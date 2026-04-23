@@ -1,0 +1,17 @@
+{
+    "name": "voice-chat-server",
+    "version": "1.0.0",
+    "description": "WebRTC voice chat server with Socket.IO signaling",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js"
+    },
+    "license": "MIT",
+    "dependencies": {
+        "dotenv": "^17.4.2",
+        "ejs": "^5.0.2",
+        "express": "^4.21.2",
+        "socket.io": "^4.8.1"
+    }
+}

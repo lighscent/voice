@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Room <%= roomId %> · Voice Chat</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #1a1a1a;
+        color: #ffffff;
+        margin: 0;
+        padding: 20px;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #2d2d2d;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+      }
+      header {
+        background-color: #333333;
+        color: white;
+        padding: 20px;
+        text-align: center;
+      }
+      .room-info {
+        background-color: #333333;
+        padding: 15px;
+        border-bottom: 1px solid #444444;
+      }
+      .room-info p {
+        margin: 5px 0;
+        font-size: 14px;
+        color: #cccccc;
+      }
+      .room-id {
+        font-weight: bold;
+        font-size: 16px;
+        color: #ffffff;
+      }
+      main {
+        padding: 20px;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+      button {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        min-width: 100px;
+      }
+      .btn-primary {
+        background-color: #007bff;
+        color: white;
+      }
+      .btn-primary:hover {
+        background-color: #0056b3;
+      }
+      .btn-danger {
+        background-color: #dc3545;
+        color: white;
+      }
+      .btn-danger:hover {
+        background-color: #c82333;
+      }
+      .btn-success {
+        background-color: #28a745;
+        color: white;
+      }
+      .btn-success:hover {
+        background-color: #218838;
+      }
+      .status {
+        padding: 10px;
+        background-color: #333333;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        font-weight: bold;
+        color: #ffffff;
+      }
+      .share-section {
+        margin-bottom: 20px;
+      }
+      .share-section input {
+        width: 200px;
+        padding: 8px;
+        border: 1px solid #555555;
+        border-radius: 4px;
+        margin-right: 10px;
+        background: #444444;
+        color: #ffffff;
+      }
+      .share-section input:focus {
+        outline: none;
+        border-color: #666666;
+      }
+      .peers {
+        display: grid;
+        gap: 15px;
+      }
+      .peer {
+        background-color: #333333;
+        border: 1px solid #444444;
+        border-radius: 4px;
+        padding: 15px;
+        text-align: center;
+        color: #ffffff;
+      }
+      audio {
+        width: 100%;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Voice Chat Room</h1>
+      </header>
+      <div class="room-info">
+        <p>
+          <strong>Room ID:</strong> <span class="room-id"><%= roomId %></span>
+        </p>
+        <p><strong>Your Username:</strong> <%= username %></p>
+        <p>Share this room ID with another person to start a voice chat.</p>
+      </div>
+      <main>
+        <div class="share-section">
+          <input id="roomLink" readonly value="<%= roomId %>" />
+          <button id="copyBtn" class="btn-primary">Copy ID</button>
+        </div>
+
+        <div class="controls">
+          <button id="muteBtn" class="btn-danger" disabled>Mute</button>
+          <button id="leaveBtn" class="btn-primary">Leave Room</button>
+        </div>
+
+        <div class="status" id="status">Connecting...</div>
+        <div class="peers" id="peers"></div>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const roomId = "<%= roomId %>";
+      const username = "<%= username %>";
+      const socket = io();
+
+      const status = document.getElementById("status");
+      const peersContainer = document.getElementById("peers");
+      const muteBtn = document.getElementById("muteBtn");
+      const leaveBtn = document.getElementById("leaveBtn");
+      const copyBtn = document.getElementById("copyBtn");
+
+      let localStream = null;
+      let isMuted = false;
+      const peers = new Map();
+
+      function getMedia(constraints) {
+        console.log("Checking media access:");
+        console.log("navigator.mediaDevices:", !!navigator.mediaDevices);
+        console.log("getUserMedia:", !!navigator.mediaDevices?.getUserMedia);
+        console.log("isSecureContext:", window.isSecureContext);
+        console.log("hostname:", window.location.hostname);
+
+        // Check if mediaDevices API is available
+        if (!navigator.mediaDevices) {
+          return Promise.reject(
+            new Error(
+              "MediaDevices API not available. Please use a modern browser.",
+            ),
+          );
+        }
+
+        if (navigator.mediaDevices.getUserMedia) {
+          return navigator.mediaDevices.getUserMedia(constraints);
+        }
+
+        const legacyGetUserMedia =
+          navigator.getUserMedia ||
+          navigator.webkitGetUserMedia ||
+          navigator.mozGetUserMedia ||
+          navigator.msGetUserMedia;
+
+        if (legacyGetUserMedia) {
+          return new Promise((resolve, reject) => {
+            legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+          });
+        }
+
+        // Allow HTTP on localhost for development
+        const isLocalhost =
+          window.location.hostname === "82.153.202.147" ||
+          window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1";
+        const secureText =
+          window.isSecureContext || isLocalhost
+            ? ""
+            : " (requires secure context / HTTPS for some browsers)";
+        return Promise.reject(
+          new Error(
+            `getUserMedia is not supported in this browser${secureText}.`,
+          ),
+        );
+      }
+
+      async function startLocalStream() {
+        localStream = await getMedia({ audio: true, video: false });
+      }
+
+      function createPeerConnection(peerId) {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        localStream
+          .getTracks()
+          .forEach((track) => pc.addTrack(track, localStream));
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit("ice-candidate", {
+              target: peerId,
+              candidate: event.candidate,
+            });
+          }
+        };
+
+        pc.ontrack = (event) => {
+          let audio = document.getElementById(`audio-${peerId}`);
+          if (!audio) {
+            const card = document.createElement("div");
+            card.className = "peer";
+            audio = document.createElement("audio");
+            audio.id = `audio-${peerId}`;
+            audio.autoplay = true;
+            audio.controls = true;
+            card.appendChild(audio);
+            peersContainer.appendChild(card);
+          }
+          audio.srcObject = event.streams[0];
+        };
+
+        return pc;
+      }
+
+      async function joinRoom() {
+        try {
+          await startLocalStream();
+          status.textContent = "Joining room...";
+          socket.emit("join-room", { roomId, username });
+        } catch (err) {
+          console.error("Media access error:", err);
+          status.textContent = "Microphone access failed: " + err.message;
+        }
+      }
+
+      function closeAllPeers() {
+        for (const pc of peers.values()) {
+          pc.close();
+        }
+        peers.clear();
+      }
+
+      copyBtn.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(roomId);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => (copyBtn.textContent = "Copy ID"), 1200);
+      });
+
+      muteBtn.addEventListener("click", () => {
+        if (!localStream) return;
+        isMuted = !isMuted;
+        localStream
+          .getAudioTracks()
+          .forEach((track) => (track.enabled = !isMuted));
+        muteBtn.textContent = isMuted ? "Unmute" : "Mute";
+        muteBtn.className = isMuted ? "btn-success" : "btn-danger";
+      });
+
+      leaveBtn.addEventListener("click", () => {
+        closeAllPeers();
+        socket.disconnect();
+        window.location.href = "/";
+      });
+
+      socket.on("connect", () => {
+        joinRoom();
+      });
+
+      socket.on("joined", ({ roomId: joinedRoomId, peers: existingPeers }) => {
+        status.textContent = `Joined room ${joinedRoomId}. Waiting for peer...`;
+        muteBtn.disabled = false;
+        existingPeers.forEach(async (peer) => {
+          const pc = createPeerConnection(peer.id);
+          peers.set(peer.id, pc);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("offer", { target: peer.id, sdp: offer });
+        });
+      });
+
+      socket.on("room-full", () => {
+        status.textContent =
+          "This room is already full. Please create a new one or join another room.";
+        muteBtn.disabled = true;
+      });
+
+      socket.on("peer-joined", async ({ id, username: peerName }) => {
+        status.textContent = `${peerName} joined the room.`;
+        const pc = createPeerConnection(id);
+        peers.set(id, pc);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("offer", { target: id, sdp: offer });
+      });
+
+      socket.on("offer", async ({ sender, sdp }) => {
+        const pc = createPeerConnection(sender);
+        peers.set(sender, pc);
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("answer", { target: sender, sdp: answer });
+      });
+
+      socket.on("answer", async ({ sender, sdp }) => {
+        const pc = peers.get(sender);
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        }
+      });
+
+      socket.on("ice-candidate", async ({ sender, candidate }) => {
+        const pc = peers.get(sender);
+        if (pc) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      });
+
+      socket.on("peer-left", ({ id, username: peerName }) => {
+        const pc = peers.get(id);
+        if (pc) pc.close();
+        peers.delete(id);
+        const audio = document.getElementById(`audio-${id}`);
+        if (audio) audio.remove();
+        status.textContent = `${peerName || "Peer"} left the room.`;
+      });
+    </script>
+  </body>
+</html>
