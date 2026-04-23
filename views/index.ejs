@@ -94,27 +94,17 @@
   <body>
     <div class="container">
       <h1>Voice Chat Room</h1>
-      <p>Choose a username, then create a new room or join an existing one using the room ID.</p>
+      <p>Enter your username to start talking and hearing others!</p>
       <% if (error) { %>
         <div class="error"><%= error %></div>
       <% } %>
       <div class="forms">
         <div class="form-section">
-          <h2>Create Room</h2>
-          <form action="/create-room" method="post">
-            <label for="createUsername">Username</label>
-            <input id="createUsername" name="username" placeholder="Enter your username" autocomplete="username" required />
-            <button type="submit">Create Room</button>
-          </form>
-        </div>
-        <div class="form-section">
-          <h2>Join Room</h2>
-          <form action="/join-room" method="post">
-            <label for="joinUsername">Username</label>
-            <input id="joinUsername" name="username" placeholder="Enter your username" autocomplete="username" required />
-            <label for="roomId">Room ID</label>
-            <input id="roomId" name="roomId" placeholder="Enter room ID" autocomplete="off" required />
-            <button type="submit">Join Room</button>
+          <h2>Join the Chat</h2>
+          <form action="/join" method="post">
+            <label for="username">Username</label>
+            <input id="username" name="username" placeholder="Enter your username" autocomplete="username" required />
+            <button type="submit">Join</button>
           </form>
         </div>
       </div>

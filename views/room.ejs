@@ -127,18 +127,10 @@
         <h1>Voice Chat Room</h1>
       </header>
       <div class="room-info">
-        <p>
-          <strong>Room ID:</strong> <span class="room-id"><%= roomId %></span>
-        </p>
         <p><strong>Your Username:</strong> <%= username %></p>
-        <p>Share this room ID with another person to start a voice chat.</p>
+        <p>Chat with everyone in the room!</p>
       </div>
       <main>
-        <div class="share-section">
-          <input id="roomLink" readonly value="<%= roomId %>" />
-          <button id="copyBtn" class="btn-primary">Copy ID</button>
-        </div>
-
         <div class="controls">
           <button id="muteBtn" class="btn-danger" disabled>Mute</button>
           <button id="leaveBtn" class="btn-primary">Leave Room</button>
@@ -159,7 +151,6 @@
       const peersContainer = document.getElementById("peers");
       const muteBtn = document.getElementById("muteBtn");
       const leaveBtn = document.getElementById("leaveBtn");
-      const copyBtn = document.getElementById("copyBtn");
 
       let localStream = null;
       let isMuted = false;
@@ -217,7 +208,7 @@
         localStream = await getMedia({ audio: true, video: false });
       }
 
-      function createPeerConnection(peerId) {
+      function createPeerConnection(peerId, peerUsername) {
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
@@ -240,10 +231,12 @@
           if (!audio) {
             const card = document.createElement("div");
             card.className = "peer";
+            card.id = `peer-${peerId}`;
+            card.innerHTML = `<strong>${peerUsername}</strong>`;
             audio = document.createElement("audio");
             audio.id = `audio-${peerId}`;
             audio.autoplay = true;
-            audio.controls = true;
+            audio.controls = false; // Hide controls for cleaner UI
             card.appendChild(audio);
             peersContainer.appendChild(card);
           }
@@ -271,12 +264,6 @@
         peers.clear();
       }
 
-      copyBtn.addEventListener("click", async () => {
-        await navigator.clipboard.writeText(roomId);
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => (copyBtn.textContent = "Copy ID"), 1200);
-      });
-
       muteBtn.addEventListener("click", () => {
         if (!localStream) return;
         isMuted = !isMuted;
@@ -298,10 +285,10 @@
       });
 
       socket.on("joined", ({ roomId: joinedRoomId, peers: existingPeers }) => {
-        status.textContent = `Joined room ${joinedRoomId}. Waiting for peer...`;
+        status.textContent = `Joined room. Welcome, ${username}!`;
         muteBtn.disabled = false;
         existingPeers.forEach(async (peer) => {
-          const pc = createPeerConnection(peer.id);
+          const pc = createPeerConnection(peer.id, peer.username);
           peers.set(peer.id, pc);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -309,23 +296,17 @@
         });
       });
 
-      socket.on("room-full", () => {
-        status.textContent =
-          "This room is already full. Please create a new one or join another room.";
-        muteBtn.disabled = true;
-      });
-
       socket.on("peer-joined", async ({ id, username: peerName }) => {
         status.textContent = `${peerName} joined the room.`;
-        const pc = createPeerConnection(id);
+        const pc = createPeerConnection(id, peerName);
         peers.set(id, pc);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         socket.emit("offer", { target: id, sdp: offer });
       });
 
-      socket.on("offer", async ({ sender, sdp }) => {
-        const pc = createPeerConnection(sender);
+      socket.on("offer", async ({ sender, sdp, username: peerName }) => {
+        const pc = createPeerConnection(sender, peerName);
         peers.set(sender, pc);
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
@@ -351,8 +332,8 @@
         const pc = peers.get(id);
         if (pc) pc.close();
         peers.delete(id);
-        const audio = document.getElementById(`audio-${id}`);
-        if (audio) audio.remove();
+        const peerElement = document.getElementById(`peer-${id}`);
+        if (peerElement) peerElement.remove();
         status.textContent = `${peerName || "Peer"} left the room.`;
       });
     </script>

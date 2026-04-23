@@ -22,24 +22,13 @@ app.get('/', (req, res) => {
     res.render('index', { error: req.query.error || null });
 });
 
-app.post('/create-room', (req, res) => {
+app.post('/join', (req, res) => {
     const { username } = req.body;
     if (!username || !username.trim()) {
         return res.redirect('/?error=Username is required');
     }
-    const roomId = Math.random().toString(36).substring(2, 10);
+    const roomId = 'main-room';
     res.redirect(`/room/${roomId}?username=${encodeURIComponent(username.trim())}`);
-});
-
-app.post('/join-room', (req, res) => {
-    const { username, roomId } = req.body;
-    if (!username || !username.trim()) {
-        return res.redirect('/?error=Username is required');
-    }
-    if (!roomId || !roomId.trim()) {
-        return res.redirect('/?error=Room ID is required');
-    }
-    res.redirect(`/room/${encodeURIComponent(roomId.trim())}?username=${encodeURIComponent(username.trim())}`);
 });
 
 app.get('/room/:roomId', (req, res) => {
@@ -57,14 +46,6 @@ io.on('connection', (socket) => {
     socket.on('join-room', ({ roomId, username }) => {
         socket.username = username;
         socket.roomId = roomId;
-
-        const room = io.sockets.adapter.rooms.get(roomId);
-        const roomSize = room ? room.size : 0;
-
-        if (roomSize >= 2) {
-            socket.emit('room-full', roomId);
-            return;
-        }
 
         socket.join(roomId);
         console.log(`${username} (${socket.id}) joined room ${roomId}`);
