@@ -157,6 +157,77 @@
       let localStream = null;
       let isMuted = false;
       const peers = new Map();
+      const userStats = new Map();
+
+      function addOrUpdateUserUI(id, name, isLocal = false) {
+        let card = document.getElementById(`peer-${id}`);
+        if (!card) {
+          card = document.createElement("div");
+          card.className = "peer";
+          card.id = `peer-${id}`;
+
+          card.innerHTML = `
+            <div class="peer-header"><strong>${name}${isLocal ? " (You)" : ""}</strong></div>
+            <div class="peer-stats" style="margin-top: 10px; font-size: 0.9em; color: #bbb; display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+              <span id="status-${id}" style="padding: 2px 8px; border-radius: 12px; background: ${isLocal ? "#28a745" : "#ffc107"}; color: ${isLocal ? "white" : "black"}; font-weight: bold; font-size: 0.8em;">
+                ${isLocal ? "Connected" : "Connecting..."}
+              </span>
+              <span id="ping-${id}">Ping: ${isLocal ? "< 1" : "-- "} ms</span>
+              <span id="time-${id}">00:00</span>
+            </div>
+          `;
+          if (isLocal) {
+            peersContainer.prepend(card);
+          } else {
+            peersContainer.appendChild(card);
+          }
+
+          userStats.set(id, {
+            joinTime: Date.now(),
+            statusEl: document.getElementById(`status-${id}`),
+            pingEl: document.getElementById(`ping-${id}`),
+            timeEl: document.getElementById(`time-${id}`),
+          });
+        }
+        return card;
+      }
+
+      setInterval(() => {
+        const now = Date.now();
+        userStats.forEach((stats) => {
+          if (stats.joinTime && stats.timeEl) {
+            const diff = Math.floor((now - stats.joinTime) / 1000);
+            const m = String(Math.floor(diff / 60)).padStart(2, "0");
+            const s = String(diff % 60).padStart(2, "0");
+            stats.timeEl.textContent = `${m}:${s}`;
+          }
+        });
+      }, 1000);
+
+      setInterval(async () => {
+        for (const [id, pc] of peers.entries()) {
+          if (
+            pc.iceConnectionState === "connected" ||
+            pc.iceConnectionState === "completed"
+          ) {
+            try {
+              const statsObj = await pc.getStats();
+              statsObj.forEach((report) => {
+                if (
+                  report.type === "candidate-pair" &&
+                  report.state === "succeeded"
+                ) {
+                  const ping = Math.round(report.currentRoundTripTime * 1000);
+                  const userStat = userStats.get(id);
+                  if (userStat && userStat.pingEl && !isNaN(ping)) {
+                    userStat.pingEl.textContent = `Ping: ${ping} ms`;
+                  }
+                }
+              });
+            } catch (e) {}
+          }
+        }
+      }, 2000);
 
       function getMedia(constraints) {
         console.log("Checking media access:");
@@ -211,6 +282,8 @@
       }
 
       function createPeerConnection(peerId, peerUsername) {
+        addOrUpdateUserUI(peerId, peerUsername);
+
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
@@ -228,19 +301,37 @@
           }
         };
 
+        pc.oniceconnectionstatechange = () => {
+          const stats = userStats.get(peerId);
+          if (stats && stats.statusEl) {
+            if (
+              pc.iceConnectionState === "connected" ||
+              pc.iceConnectionState === "completed"
+            ) {
+              stats.statusEl.textContent = "Connected";
+              stats.statusEl.style.background = "#28a745";
+              stats.statusEl.style.color = "white";
+            } else if (
+              pc.iceConnectionState === "disconnected" ||
+              pc.iceConnectionState === "failed"
+            ) {
+              stats.statusEl.textContent = "Disconnected";
+              stats.statusEl.style.background = "#dc3545";
+              stats.statusEl.style.color = "white";
+              stats.pingEl.textContent = `Ping: -- ms`;
+            }
+          }
+        };
+
         pc.ontrack = (event) => {
           let audio = document.getElementById(`audio-${peerId}`);
           if (!audio) {
-            const card = document.createElement("div");
-            card.className = "peer";
-            card.id = `peer-${peerId}`;
-            card.innerHTML = `<strong>${peerUsername}</strong>`;
+            const card = document.getElementById(`peer-${peerId}`);
             audio = document.createElement("audio");
             audio.id = `audio-${peerId}`;
             audio.autoplay = true;
             audio.controls = false; // Hide controls for cleaner UI
-            card.appendChild(audio);
-            peersContainer.appendChild(card);
+            if (card) card.appendChild(audio);
           }
           audio.srcObject = event.streams[0];
         };
@@ -289,6 +380,9 @@
       socket.on("joined", ({ roomId: joinedRoomId, peers: existingPeers }) => {
         status.textContent = `Joined room. Welcome, ${username}!`;
         muteBtn.disabled = false;
+
+        addOrUpdateUserUI(socket.id, username, true); // Local user UI
+
         existingPeers.forEach(async (peer) => {
           const pc = createPeerConnection(peer.id, peer.username);
           peers.set(peer.id, pc);
@@ -300,16 +394,15 @@
 
       socket.on("peer-joined", async ({ id, username: peerName }) => {
         status.textContent = `${peerName} joined the room.`;
-        const pc = createPeerConnection(id, peerName);
-        peers.set(id, pc);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit("offer", { target: id, sdp: offer });
+        // Wait for them to send us an offer
       });
 
       socket.on("offer", async ({ sender, sdp, username: peerName }) => {
-        const pc = createPeerConnection(sender, peerName);
-        peers.set(sender, pc);
+        let pc = peers.get(sender);
+        if (!pc) {
+          pc = createPeerConnection(sender, peerName);
+          peers.set(sender, pc);
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -336,6 +429,7 @@
         peers.delete(id);
         const peerElement = document.getElementById(`peer-${id}`);
         if (peerElement) peerElement.remove();
+        userStats.delete(id);
         status.textContent = `${peerName || "Peer"} left the room.`;
       });
     </script>
